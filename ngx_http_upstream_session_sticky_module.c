@@ -26,6 +26,7 @@
 typedef struct {
     ngx_str_t                           sid;
     ngx_str_t                          *name;
+    ngx_http_upstream_rr_peer_t        *peer;
     struct sockaddr                    *sockaddr;
     socklen_t                           socklen;
 
@@ -603,8 +604,7 @@ ngx_http_upstream_session_sticky_get_peer(ngx_peer_connection_t *pc, void *data)
 
             ctx->sid.len = server[i].sid.len;
             ctx->sid.data = server[i].sid.data;
-
-            sspd->rrp.current = i;
+            sspd->rrp.current = server[i].peer;
             ctx->tries--;
 
             return NGX_OK;
@@ -1351,12 +1351,13 @@ ngx_http_upstream_session_sticky_init_upstream(ngx_conf_t *cf,
 
     sscf->number = number;
 
-    for (i = 0; i < number; i++) {
-        peer = &peers->peer[i];
+    for (peer = peers->peer, i = 0; peer; peer = peer->next, i++) {
 
         sscf->server[i].name = &peer->name;
         sscf->server[i].sockaddr = peer->sockaddr;
         sscf->server[i].socklen = peer->socklen;
+
+        sscf->server[i].peer = peer;
 
 #if (NGX_HTTP_UPSTREAM_CHECK)
         sscf->server[i].check_index = peer->check_index;
@@ -1421,9 +1422,11 @@ ngx_http_upstream_session_sticky_set_peer_session(ngx_peer_connection_t *pc,
     ssl_session = sspd->ssl_session;
     rc = ngx_ssl_set_session(pc->connection, ssl_session);
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                    "set session: %p:%d",
                    ssl_session, ssl_session ? ssl_session->references : 0);
+#endif
 
     return rc;
 }
@@ -1443,16 +1446,20 @@ ngx_http_upstream_session_sticky_save_peer_session(ngx_peer_connection_t *pc,
         return;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                    "save session: %p:%d", ssl_session, ssl_session->references);
+#endif
 
     old_ssl_session = sspd->ssl_session;
     sspd->ssl_session = ssl_session;
 
     if (old_ssl_session) {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                        "old session: %p:%d",
                        old_ssl_session, old_ssl_session->references);
+#endif
 
         ngx_ssl_free_session(old_ssl_session);
     }
